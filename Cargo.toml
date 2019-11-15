@@ -1,0 +1,15 @@
+[package]
+name = "pentacle"
+version = "0.1.0"
+authors = ["iliana destroyer of worlds <iliana@buttslol.net>"]
+edition = "2018"
+exclude = [".gitignore"]
+description = "Executes programs as sealed anonymous files on Linux"
+repository = "https://github.com/iliana/pentacle"
+readme = "README.md"
+keywords = ["command", "exec", "linux", "memfd", "memfd_create", "seal"]
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
+log = "0.4"
