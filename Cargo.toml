@@ -7,7 +7,7 @@ exclude = [".gitignore"]
 description = "Executes programs as sealed anonymous files on Linux"
 repository = "https://github.com/iliana/pentacle"
 readme = "README.md"
-keywords = ["command", "exec", "linux", "memfd", "memfd_create", "seal"]
+keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
 license = "MIT"
 
 [dependencies]
