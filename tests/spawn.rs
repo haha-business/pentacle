@@ -11,7 +11,7 @@ use std::io::Result;
 #[test]
 fn so_nice_we_ran_it_twice() -> Result<()> {
     let mut command = SealedCommand::new(&mut File::open("/bin/sh")?)?;
-    command.arg("--version");
+    command.arg("-c").arg("/bin/true");
     for _ in 0..2 {
         assert!(command.output()?.status.success());
     }
