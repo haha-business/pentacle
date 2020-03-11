@@ -29,8 +29,8 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::needless_doctest_main)]
 
-#[cfg(not(target_os = "linux"))]
-compile_error!("pentacle only works on linux platforms");
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+compile_error!("pentacle only works on linux or android");
 
 mod syscall;
 
