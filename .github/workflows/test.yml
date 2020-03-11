@@ -1,0 +1,15 @@
+name: Test
+on:
+  pull_request:
+    branches: [magick]
+  push:
+    branches: [staging, trying]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: rustup update stable
+      - run: cargo fmt -- --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
