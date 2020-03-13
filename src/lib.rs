@@ -27,9 +27,10 @@
     unstable_features
 )]
 #![warn(clippy::pedantic)]
+#![allow(clippy::must_use_candidate, clippy::needless_doctest_main)]
 
-#[cfg(not(target_os = "linux"))]
-compile_error!("pentacle only works on linux platforms");
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+compile_error!("pentacle only works on linux or android");
 
 mod syscall;
 
@@ -53,15 +54,19 @@ const MEMFD_SEALS: libc::c_int = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_S
 /// the program begins again, this function will detect `/proc/self/exe` as a sealed anonymous
 /// file and return `Ok(())`.
 ///
-/// An error is returned if `/proc/self/exe` fails to open, `memfd_create(2)` fails, the `fcntl(2)`
-/// `F_ADD_SEALS` command fails, or copying from `/proc/self/exe` to the anonymous file fails.
-///
 /// You should call this function at the beginning of `main`. This function has the same
 /// implications as [`CommandExt::exec`]: no destructors on the current stack or any other thread’s
 /// stack will be run.
 ///
+/// # Compatibility
+///
 /// This library is unable to set the program name (`argv[0]`), which will cause unexpected
 /// behavior for multi-call binaries and other programs that use the program name.
+///
+/// # Errors
+///
+/// An error is returned if `/proc/self/exe` fails to open, `memfd_create(2)` fails, the `fcntl(2)`
+/// `F_ADD_SEALS` command fails, or copying from `/proc/self/exe` to the anonymous file fails.
 pub fn ensure_sealed() -> Result<()> {
     let mut file = File::open("/proc/self/exe")?;
     if is_sealed_inner(&file) {
@@ -100,11 +105,15 @@ impl SealedCommand {
     /// Constructs a new [`Command`] for launching the program data in `program` as a sealed
     /// memory-backed file, with the same default configuration as [`Command::new`].
     ///
-    /// An error is returned if `memfd_create(2)` fails, the `fcntl(2)` `F_ADD_SEALS` command
-    /// fails, or copying from `program` to the anonymous file fails.
+    /// # Compatibility
     ///
     /// This library is unable to set the program name (`argv[0]`), which will cause unexpected
     /// behavior for multi-call binaries and other programs that use the program name.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if `memfd_create(2)` fails, the `fcntl(2)` `F_ADD_SEALS` command
+    /// fails, or copying from `program` to the anonymous file fails.
     pub fn new<R: Read>(program: &mut R) -> Result<Self> {
         let memfd_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"pentacle_sealed\0") };
         let mut memfd = memfd_create(memfd_name, MFD_CLOEXEC | MFD_ALLOW_SEALING)?;
