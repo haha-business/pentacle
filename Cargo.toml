@@ -13,3 +13,7 @@ license = "MIT"
 [dependencies]
 libc = "0.2"
 log = "0.4"
+
+[package.metadata.docs.rs]
+# https://docs.rs/about#metadata
+targets = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
