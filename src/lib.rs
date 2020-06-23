@@ -39,7 +39,7 @@ use libc::{F_SEAL_GROW, F_SEAL_SEAL, F_SEAL_SHRINK, F_SEAL_WRITE, MFD_ALLOW_SEAL
 use std::ffi::CStr;
 use std::fmt::{self, Debug};
 use std::fs::File;
-use std::io::{self, Read, Result};
+use std::io::{self, Read, Result, Write};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
@@ -105,6 +105,9 @@ impl SealedCommand {
     /// Constructs a new [`Command`] for launching the program data in `program` as a sealed
     /// memory-backed file, with the same default configuration as [`Command::new`].
     ///
+    /// The memory-backed file will close on `execve(2)` **unless** the program starts with `#!`
+    /// (indicating that it is an interpreter script).
+    ///
     /// # Compatibility
     ///
     /// This library is unable to set the program name (`argv[0]`), which will cause unexpected
@@ -115,9 +118,25 @@ impl SealedCommand {
     /// An error is returned if `memfd_create(2)` fails, the `fcntl(2)` `F_ADD_SEALS` command
     /// fails, or copying from `program` to the anonymous file fails.
     pub fn new<R: Read>(program: &mut R) -> Result<Self> {
+        let mut memfd_flags = MFD_ALLOW_SEALING;
+
+        // If the program starts with `#!` (a shebang or hash-bang), the kernel will (almost
+        // always; depends if `BINFMT_SCRIPT` is enabled) determine which interpreter to exec and
+        // pass the script along as the first argument. In this case, the argument will be
+        // `/proc/self/fd/{}`, which gets closed if MFD_CLOEXEC is set. We check for `#!` and only
+        // set MFD_CLOEXEC if it's not there.
+        let mut buf = [0; 8192];
+        let n = program.read(&mut buf)?;
+        if !(n >= 2 && &buf[..2] == b"#!") {
+            memfd_flags |= MFD_CLOEXEC;
+        }
+
         let memfd_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"pentacle_sealed\0") };
-        let mut memfd = memfd_create(memfd_name, MFD_CLOEXEC | MFD_ALLOW_SEALING)?;
+        let mut memfd = memfd_create(memfd_name, memfd_flags)?;
+
+        memfd.write_all(&buf[..n])?;
         io::copy(program, &mut memfd)?;
+
         fcntl_add_seals(&memfd, MEMFD_SEALS)?;
 
         Ok(Self {
