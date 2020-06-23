@@ -17,3 +17,13 @@ fn so_nice_we_ran_it_twice() -> Result<()> {
     }
     Ok(())
 }
+
+// Test that we can execute a script with a shebang.
+#[test]
+fn shebang() {
+    let mut command = SealedCommand::new(&mut &b"#!/bin/sh\necho 'it works'\n"[..]).unwrap();
+    let output = command.output().unwrap();
+    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"it works\n");
+}
