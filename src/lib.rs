@@ -58,11 +58,6 @@ const MEMFD_SEALS: libc::c_int = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_S
 /// implications as [`CommandExt::exec`]: no destructors on the current stack or any other thread’s
 /// stack will be run.
 ///
-/// # Compatibility
-///
-/// This library is unable to set the program name (`argv[0]`), which will cause unexpected
-/// behavior for multi-call binaries and other programs that use the program name.
-///
 /// # Errors
 ///
 /// An error is returned if `/proc/self/exe` fails to open, `memfd_create(2)` fails, the `fcntl(2)`
@@ -72,9 +67,13 @@ pub fn ensure_sealed() -> Result<()> {
     if is_sealed_inner(&file) {
         Ok(())
     } else {
-        Err(SealedCommand::new(&mut file)?
-            .args(std::env::args_os().skip(1))
-            .exec())
+        let mut command = SealedCommand::new(&mut file)?;
+        let mut args = std::env::args_os().fuse();
+        if let Some(arg0) = args.next() {
+            command.arg0(arg0);
+        }
+        command.args(args);
+        Err(command.exec())
     }
 }
 
@@ -108,10 +107,8 @@ impl SealedCommand {
     /// The memory-backed file will close on `execve(2)` **unless** the program starts with `#!`
     /// (indicating that it is an interpreter script).
     ///
-    /// # Compatibility
-    ///
-    /// This library is unable to set the program name (`argv[0]`), which will cause unexpected
-    /// behavior for multi-call binaries and other programs that use the program name.
+    /// `argv[0]` of the program will default to the file descriptor path in procfs (for example,
+    /// `/proc/self/fd/3`). [`CommandExt::arg0`] can override this.
     ///
     /// # Errors
     ///
