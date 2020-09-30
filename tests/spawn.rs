@@ -1,4 +1,4 @@
-// Copyright (c) 2019 iliana destroyer of worlds <iliana@buttslol.net>
+// Copyright (c) iliana destroyer of worlds <iliana@buttslol.net>
 // SPDX-License-Identifier: MIT
 
 #![warn(clippy::pedantic)]
