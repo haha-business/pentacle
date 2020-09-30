@@ -1,4 +1,4 @@
-// Copyright (c) 2019 iliana destroyer of worlds <iliana@buttslol.net>
+// Copyright (c) iliana destroyer of worlds <iliana@buttslol.net>
 // SPDX-License-Identifier: MIT
 
 // syscall returns a c_long but memfd_create(2) and fcntl(2) are documented as returning c_int. The
