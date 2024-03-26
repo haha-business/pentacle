@@ -11,6 +11,6 @@
 #[test]
 fn main() {
     pentacle::ensure_sealed().unwrap();
-    assert_eq!(pentacle::is_sealed(), true);
+    assert!(pentacle::is_sealed());
     assert!(std::env::args().next().unwrap().contains("ensure_sealed"));
 }
