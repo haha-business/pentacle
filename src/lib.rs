@@ -87,7 +87,7 @@ pub fn is_sealed() -> bool {
 }
 
 fn is_sealed_inner(file: &File) -> bool {
-    fcntl_get_seals(file) == MEMFD_SEALS
+    fcntl_get_seals(file) & MEMFD_SEALS == MEMFD_SEALS
 }
 
 /// A [`Command`] wrapper that spawns sealed memory-backed programs.
