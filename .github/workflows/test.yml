@@ -1,9 +1,10 @@
 name: Test
 on:
-  pull_request:
-    branches: [magick]
   push:
-    branches: [staging, trying]
+    branches-ignore:
+      - magick
+  pull_request:
+  merge_group:
 jobs:
   test:
     runs-on: ubuntu-latest
