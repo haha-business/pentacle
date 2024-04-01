@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- The source repository has moved to <https://github.com/haha-business/pentacle>
 - `is_sealed` correctly handles the presence of additional seals (e.g. `F_SEAL_FUTURE_WRITE` since Linux 5.1)
 
 ## [1.0.0] - 2020-09-29
