@@ -2,12 +2,12 @@
 name = "pentacle"
 version = "1.0.0"
 edition = "2018"
-exclude = [".github", ".gitignore"]
 description = "Executes programs as sealed anonymous files on Linux"
-repository = "https://github.com/haha-business/pentacle"
 readme = "README.md"
-keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
+repository = "https://github.com/haha-business/pentacle"
 license = "MIT"
+keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
+exclude = [".github", ".gitignore"]
 
 [dependencies]
 libc = "0.2.99"
