@@ -10,8 +10,8 @@ keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
 license = "MIT"
 
 [dependencies]
-libc = "0.2"
-log = "0.4"
+libc = "0.2.99"
+log = "0.4.4"
 
 [package.metadata.docs.rs]
 # https://docs.rs/about/metadata
