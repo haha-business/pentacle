@@ -3,6 +3,7 @@ on:
   push:
     branches-ignore:
       - magick
+      - 'gh-readonly-queue/**'
   pull_request:
   merge_group:
 jobs:
