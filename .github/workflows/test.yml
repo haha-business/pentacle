@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - run: rustup update stable
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets -- -D warnings
