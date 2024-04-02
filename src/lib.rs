@@ -9,7 +9,8 @@
 //! before execution.
 //!
 //! The library provides [a wrapper around `Command`][`SealedCommand`] as well as two helper
-//! functions for programs that execute sealed versions of themselves.
+//! functions, [`ensure_sealed`] and [`is_sealed`], for programs that execute sealed versions of
+//! themselves.
 //!
 //! ```
 //! fn main() {
@@ -18,13 +19,17 @@
 //!     // The rest of your code
 //! }
 //! ```
+//!
+//! Lower-level control over the creation and sealing of anonymous files is available via
+//! [`SealOptions`].
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(not(coverage_nightly), deny(unstable_features))]
 #![deny(
     missing_copy_implementations,
     missing_debug_implementations,
     missing_docs,
-    rust_2018_idioms,
-    unstable_features
+    rust_2018_idioms
 )]
 #![warn(clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::needless_doctest_main)]
@@ -32,11 +37,11 @@
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 compile_error!("pentacle only works on linux or android");
 
+mod file;
 mod syscall;
 
-use crate::syscall::{fcntl_add_seals, fcntl_get_seals, memfd_create};
-use libc::{F_SEAL_GROW, F_SEAL_SEAL, F_SEAL_SHRINK, F_SEAL_WRITE, MFD_ALLOW_SEALING, MFD_CLOEXEC};
-use std::ffi::CStr;
+pub use crate::file::{MustSealError, SealOptions};
+
 use std::fmt::{self, Debug};
 use std::fs::File;
 use std::io::{self, Read, Result, Write};
@@ -45,7 +50,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-const MEMFD_SEALS: libc::c_int = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE;
+const OPTIONS: SealOptions<'static> = SealOptions::new().executable(true);
 
 /// Ensure the currently running program is a sealed anonymous file.
 ///
@@ -61,10 +66,11 @@ const MEMFD_SEALS: libc::c_int = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_S
 /// # Errors
 ///
 /// An error is returned if `/proc/self/exe` fails to open, `memfd_create(2)` fails, the `fcntl(2)`
-/// `F_ADD_SEALS` command fails, or copying from `/proc/self/exe` to the anonymous file fails.
+/// `F_GET_SEALS` or `F_ADD_SEALS` commands fail, or copying from `/proc/self/exe` to the anonymous
+/// file fails.
 pub fn ensure_sealed() -> Result<()> {
     let mut file = File::open("/proc/self/exe")?;
-    if is_sealed_inner(&file) {
+    if OPTIONS.is_sealed(&file) {
         Ok(())
     } else {
         let mut command = SealedCommand::new(&mut file)?;
@@ -82,12 +88,8 @@ pub fn ensure_sealed() -> Result<()> {
 /// This function returns `false` if opening `/proc/self/exe` fails.
 pub fn is_sealed() -> bool {
     File::open("/proc/self/exe")
-        .map(|f| is_sealed_inner(&f))
+        .map(|f| OPTIONS.is_sealed(&f))
         .unwrap_or(false)
-}
-
-fn is_sealed_inner(file: &File) -> bool {
-    fcntl_get_seals(file) & MEMFD_SEALS == MEMFD_SEALS
 }
 
 /// A [`Command`] wrapper that spawns sealed memory-backed programs.
@@ -112,11 +114,9 @@ impl SealedCommand {
     ///
     /// # Errors
     ///
-    /// An error is returned if `memfd_create(2)` fails, the `fcntl(2)` `F_ADD_SEALS` command
-    /// fails, or copying from `program` to the anonymous file fails.
+    /// An error is returned if `memfd_create(2)` fails, the `fcntl(2)` `F_GET_SEALS` or
+    /// `F_ADD_SEALS` commands fail, or copying from `program` to the anonymous file fails.
     pub fn new<R: Read>(program: &mut R) -> Result<Self> {
-        let mut memfd_flags = MFD_ALLOW_SEALING;
-
         // If the program starts with `#!` (a shebang or hash-bang), the kernel will (almost
         // always; depends if `BINFMT_SCRIPT` is enabled) determine which interpreter to exec and
         // pass the script along as the first argument. In this case, the argument will be
@@ -124,17 +124,12 @@ impl SealedCommand {
         // set MFD_CLOEXEC if it's not there.
         let mut buf = [0; 8192];
         let n = program.read(&mut buf)?;
-        if !(n >= 2 && &buf[..2] == b"#!") {
-            memfd_flags |= MFD_CLOEXEC;
-        }
+        let options = OPTIONS.close_on_exec(buf.get(..2) != Some(b"#!"));
 
-        let memfd_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"pentacle_sealed\0") };
-        let mut memfd = memfd_create(memfd_name, memfd_flags)?;
-
+        let mut memfd = options.create()?;
         memfd.write_all(&buf[..n])?;
         io::copy(program, &mut memfd)?;
-
-        fcntl_add_seals(&memfd, MEMFD_SEALS)?;
+        options.seal(&mut memfd)?;
 
         Ok(Self {
             inner: Command::new(format!("/proc/self/fd/{}", memfd.as_raw_fd())),
@@ -144,6 +139,7 @@ impl SealedCommand {
 }
 
 impl Debug for SealedCommand {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.inner.fmt(f)
     }
@@ -152,12 +148,14 @@ impl Debug for SealedCommand {
 impl Deref for SealedCommand {
     type Target = Command;
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn deref(&self) -> &Command {
         &self.inner
     }
 }
 
 impl DerefMut for SealedCommand {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn deref_mut(&mut self) -> &mut Command {
         &mut self.inner
     }

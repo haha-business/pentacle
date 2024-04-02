@@ -1,7 +1,8 @@
 [package]
 name = "pentacle"
 version = "1.0.0"
-edition = "2018"
+edition = "2021"
+rust-version = "1.59"
 description = "Executes programs as sealed anonymous files on Linux"
 readme = "README.md"
 repository = "https://github.com/haha-business/pentacle"
@@ -10,7 +11,7 @@ keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
 exclude = [".github", ".gitignore"]
 
 [dependencies]
-libc = "0.2.99"
+libc = "0.2.153"
 log = "0.4.4"
 
 [package.metadata.docs.rs]

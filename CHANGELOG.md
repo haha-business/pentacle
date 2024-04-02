@@ -5,9 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `SealOptions`, an interface for directly creating and sealing anonymous files outside the context
+  of executing them
+
+### Fixed
+- Creating executable anonymous files works correctly since Linux 6.3 when the sysctl
+  `vm.memfd_noexec = 1` is set
+- `is_sealed` correctly handles the presence of additional seals (e.g. `F_SEAL_FUTURE_WRITE` since
+  Linux 5.1 or `F_SEAL_EXEC` since Linux 6.3)
+
 ### Changed
-- The source repository has moved to <https://github.com/haha-business/pentacle>
-- `is_sealed` correctly handles the presence of additional seals (e.g. `F_SEAL_FUTURE_WRITE` since Linux 5.1)
+- `SealedCommand` and `execute_sealed` set `F_SEAL_EXEC` on Linux 6.3 and newer
+- Moved source repository to <https://github.com/haha-business/pentacle>
+- Minimum supported Rust version (MSRV) now 1.59.0
 
 ## [1.0.0] - 2020-09-29
 ### Changed
