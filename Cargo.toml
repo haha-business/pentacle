@@ -1,18 +1,18 @@
 [package]
 name = "pentacle"
 version = "1.0.0"
-authors = ["iliana destroyer of worlds <iliana@buttslol.net>"]
-edition = "2018"
-exclude = [".github", ".gitignore"]
+edition = "2021"
+rust-version = "1.59"
 description = "Executes programs as sealed anonymous files on Linux"
-repository = "https://github.com/iliana/pentacle"
 readme = "README.md"
-keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
+repository = "https://github.com/haha-business/pentacle"
 license = "MIT"
+keywords = ["command", "exec", "memfd", "memfd_create", "seal"]
+exclude = [".github", ".gitignore"]
 
 [dependencies]
-libc = "0.2"
-log = "0.4"
+libc = "0.2.153"
+log = "0.4.4"
 
 [package.metadata.docs.rs]
 # https://docs.rs/about/metadata
