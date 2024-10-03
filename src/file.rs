@@ -6,13 +6,12 @@
 use std::ffi::CStr;
 use std::fmt::{self, Debug, Display};
 use std::fs::{File, Permissions};
-use std::io::{self, Error, ErrorKind, Read, Result};
+use std::io::{self, Error, ErrorKind, Read};
 use std::os::unix::fs::PermissionsExt as _;
 
-use libc::{
-    c_int, c_uint, EINVAL, F_SEAL_FUTURE_WRITE, F_SEAL_GROW, F_SEAL_SEAL, F_SEAL_SHRINK,
-    F_SEAL_WRITE, MFD_ALLOW_SEALING, MFD_CLOEXEC, MFD_EXEC, MFD_NOEXEC_SEAL,
-};
+use crate::syscall::{MemfdFlags, SealFlags};
+
+use libc::EINVAL;
 
 // SAFETY: The provided slice is nul-terminated and does not contain any interior nul bytes. On Rust
 // 1.64 and later (rust-lang/rust#99977), these required invariants are checked at compile time.
@@ -22,27 +21,13 @@ use libc::{
 const DEFAULT_MEMFD_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"pentacle_sealed\0") };
 
-// not yet present in the libc crate
-// linux: include/uapi/linux/fcntl.h
-const F_SEAL_EXEC: c_int = 0x0020;
-
-macro_rules! set_flag {
-    ($flags:expr, $flag:expr, $value:expr) => {
-        if $value {
-            $flags |= $flag;
-        } else {
-            $flags &= !$flag;
-        }
-    };
-}
-
 macro_rules! seal {
     (
         $seal_ident:ident
         $( { $( #[ $attr:meta ] )* } )? ,
         $must_seal_ident:ident
         $( { $( #[ $must_attr:meta ] )* } )? ,
-        $( ? $preflight:ident : )? $flag:expr,
+        $( ? $preflight:ident : )? $flag:ident,
         $try_to:expr,
         $default:expr
     ) => {
@@ -56,10 +41,10 @@ macro_rules! seal {
         $($( #[ $attr ] )*)?
         pub const fn $seal_ident(mut self, $seal_ident: bool) -> SealOptions<'a> {
             if true $( && self.$preflight() )? {
-                set_flag!(self.seal_flags, $flag, $seal_ident);
+                self.seal_flags = self.seal_flags.set(SealFlags::$flag, $seal_ident);
             }
             if !$seal_ident {
-                self.must_seal_flags &= !$flag;
+                self.must_seal_flags = self.must_seal_flags.set(SealFlags::$flag, false);
             }
             self
         }
@@ -72,23 +57,22 @@ macro_rules! seal {
         $($( #[ $must_attr ] )*)?
         pub const fn $must_seal_ident(mut self, $must_seal_ident: bool) -> SealOptions<'a> {
             if $must_seal_ident {
-                self.seal_flags |= $flag;
+                self.seal_flags = self.seal_flags.set(SealFlags::$flag, true);
             }
-            set_flag!(self.must_seal_flags, $flag, $must_seal_ident);
+            self.must_seal_flags = self.must_seal_flags.set(SealFlags::$flag, $must_seal_ident);
             self
         }
     };
 }
 
 /// Options for creating a sealed anonymous file.
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct SealOptions<'a> {
     memfd_name: &'a CStr,
-    memfd_flags: c_uint,
-    seal_flags: c_int,
-    must_seal_flags: c_int,
+    memfd_flags: MemfdFlags,
+    seal_flags: SealFlags,
+    must_seal_flags: SealFlags,
 }
 
 impl<'a> SealOptions<'a> {
@@ -107,15 +91,20 @@ impl<'a> SealOptions<'a> {
     ///     .must_seal_writing(true)
     ///     .seal_future_writing(false)
     ///     .seal_executable(false);
-    /// # // terrible hack to test equivalence without committing to `PartialEq`
-    /// # assert_eq!(format!("{:?}", result), format!("{:?}", SealOptions::new()));
+    /// # assert_eq!(result, SealOptions::new());
     /// ```
     pub const fn new() -> SealOptions<'a> {
+        const MEMFD_DEFAULT: MemfdFlags = MemfdFlags::CLOEXEC.set(MemfdFlags::ALLOW_SEALING, true);
+        const SEAL_DEFAULT: SealFlags = SealFlags::SEAL
+            .set(SealFlags::SHRINK, true)
+            .set(SealFlags::GROW, true)
+            .set(SealFlags::WRITE, true);
+
         SealOptions {
             memfd_name: DEFAULT_MEMFD_NAME,
-            memfd_flags: MFD_ALLOW_SEALING | MFD_CLOEXEC,
-            seal_flags: F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE,
-            must_seal_flags: F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE,
+            memfd_flags: MEMFD_DEFAULT,
+            seal_flags: SEAL_DEFAULT,
+            must_seal_flags: SEAL_DEFAULT,
         }
     }
 
@@ -127,7 +116,7 @@ impl<'a> SealOptions<'a> {
     ///
     /// This flag is `true` by default, matching the behavior of [`std::fs`].
     pub const fn close_on_exec(mut self, close_on_exec: bool) -> SealOptions<'a> {
-        set_flag!(self.memfd_flags, MFD_CLOEXEC, close_on_exec);
+        self.memfd_flags = self.memfd_flags.set(MemfdFlags::CLOEXEC, close_on_exec);
         self
     }
 
@@ -151,27 +140,29 @@ impl<'a> SealOptions<'a> {
     /// given tools to control this (see also <https://lwn.net/Articles/918106/>):
     ///
     /// - Setting the sysctl `vm.memfd_noexec = 1` disables creating executable anonymous files
-    ///   unless the program requests it with `MFD_EXEC`.
+    ///   unless the program requests it with `MFD_EXEC` (set by pentacle if `executable` is
+    ///   `true`).
     /// - Setting the sysctl `vm.memfd_noexec = 2` disables the ability to create executable
-    ///   anonymous files altogether, and `MFD_NOEXEC_SEAL` _must_ be used.
+    ///   anonymous files altogether, and `MFD_NOEXEC_SEAL` _must_ be used (set by pentacle if
+    ///   `executable` is `false`).
     /// - Calling `memfd_create(2)` with `MFD_NOEXEC_SEAL` enables the `F_SEAL_EXEC` seal.
     ///
     /// Linux prior to 6.3 is unaware of `MFD_EXEC` and `F_SEAL_EXEC`. If `memfd_create(2)` sets
     /// `errno` to `EINVAL`, this library retries the call without possibly-unknown flags, and the
     /// permission bits of the memfd are adjusted depending on this setting.
     pub const fn executable(mut self, executable: bool) -> SealOptions<'a> {
-        self.memfd_flags = self.memfd_flags & !MFD_EXEC & !MFD_NOEXEC_SEAL
-            | if executable {
-                MFD_EXEC
-            } else {
-                MFD_NOEXEC_SEAL
-            };
-        self.seal_flags |= F_SEAL_EXEC;
+        self.memfd_flags = self
+            .memfd_flags
+            .set(MemfdFlags::EXEC, executable)
+            .set(MemfdFlags::NOEXEC_SEAL, !executable);
+        self.seal_flags = self.seal_flags.set(SealFlags::EXEC, true);
         self
     }
 
     const fn is_executable_set(&self) -> bool {
-        self.memfd_flags & (MFD_EXEC | MFD_NOEXEC_SEAL) != 0
+        const MASK: MemfdFlags = MemfdFlags::EXEC.set(MemfdFlags::NOEXEC_SEAL, true);
+
+        self.memfd_flags.any(MASK)
     }
 
     /// Set a name for the file for debugging purposes.
@@ -187,28 +178,28 @@ impl<'a> SealOptions<'a> {
     seal!(
         seal_seals,
         must_seal_seals,
-        F_SEAL_SEAL,
+        SEAL,
         "prevent further seals from being set on this file",
         true
     );
     seal!(
         seal_shrinking,
         must_seal_shrinking,
-        F_SEAL_SHRINK,
+        SHRINK,
         "prevent shrinking this file",
         true
     );
     seal!(
         seal_growing,
         must_seal_growing,
-        F_SEAL_GROW,
+        GROW,
         "prevent growing this file",
         true
     );
     seal!(
         seal_writing,
         must_seal_writing,
-        F_SEAL_WRITE,
+        WRITE,
         "prevent writing to this file",
         true
     );
@@ -221,7 +212,7 @@ impl<'a> SealOptions<'a> {
             #[doc = ""]
             #[doc = "This requires at least Linux 5.1."]
         },
-        F_SEAL_FUTURE_WRITE,
+        FUTURE_WRITE,
         "prevent directly writing to this file or creating new writable mappings, \
             but allow writes to existing writable mappings",
         false
@@ -230,7 +221,9 @@ impl<'a> SealOptions<'a> {
         seal_executable {
             #[doc = ""]
             #[doc = "If [`SealOptions::executable`] has already been called,"]
-            #[doc = "this function does nothing."]
+            #[doc = "this function does nothing, apart from setting"]
+            #[doc = "[`SealOptions::must_seal_executable`] to `false`"]
+            #[doc = "if `seal_executable` is `false`."]
             #[doc = ""]
             #[doc = "This requires at least Linux 6.3."]
         },
@@ -238,7 +231,7 @@ impl<'a> SealOptions<'a> {
             #[doc = ""]
             #[doc = "This requires at least Linux 6.3."]
         },
-        ? seal_executable_preflight : F_SEAL_EXEC,
+        ? seal_executable_preflight : EXEC,
         "prevent modifying the executable permission of the file",
         false
     );
@@ -263,7 +256,7 @@ impl<'a> SealOptions<'a> {
     ///
     /// This method returns an error when any of [`SealOptions::create`], [`std::io::copy`], or
     /// [`SealOptions::seal`] fail.
-    pub fn copy_and_seal<R: Read>(&self, reader: &mut R) -> Result<File> {
+    pub fn copy_and_seal<R: Read>(&self, reader: &mut R) -> Result<File, Error> {
         let mut file = self.create()?;
         io::copy(reader, &mut file)?;
         self.seal(&mut file)?;
@@ -281,7 +274,7 @@ impl<'a> SealOptions<'a> {
     /// This method returns an error when:
     /// - `memfd_create(2)` fails
     /// - `SealOptions::executable` was set but permissions cannot be changed as required
-    pub fn create(&self) -> Result<File> {
+    pub fn create(&self) -> Result<File, Error> {
         let file = match crate::syscall::memfd_create(self.memfd_name, self.memfd_flags) {
             Ok(file) => file,
             Err(err) if err.raw_os_error() == Some(EINVAL) && self.is_executable_set() => {
@@ -293,7 +286,9 @@ impl<'a> SealOptions<'a> {
                 // EACCES.)
                 crate::syscall::memfd_create(
                     self.memfd_name,
-                    self.memfd_flags & !MFD_EXEC & !MFD_NOEXEC_SEAL,
+                    self.memfd_flags
+                        .set(MemfdFlags::EXEC, false)
+                        .set(MemfdFlags::NOEXEC_SEAL, false),
                 )?
             }
             Err(err) => return Err(err),
@@ -302,9 +297,9 @@ impl<'a> SealOptions<'a> {
         if self.is_executable_set() {
             let permissions = file.metadata()?.permissions();
             let new_permissions =
-                Permissions::from_mode(if self.memfd_flags & MFD_NOEXEC_SEAL != 0 {
+                Permissions::from_mode(if self.memfd_flags.all(MemfdFlags::NOEXEC_SEAL) {
                     permissions.mode() & !0o111
-                } else if self.memfd_flags & MFD_EXEC != 0 {
+                } else if self.memfd_flags.all(MemfdFlags::EXEC) {
                     permissions.mode() | 0o111
                 } else {
                     return Ok(file);
@@ -329,15 +324,23 @@ impl<'a> SealOptions<'a> {
     /// - the `fcntl(2)` `F_GET_SEALS` command fails
     /// - if any required seals are not present (in this case,
     ///   [`Error::source`][`std::error::Error::source`] will be [`MustSealError`])
-    pub fn seal(&self, file: &mut File) -> Result<()> {
+    pub fn seal(&self, file: &mut File) -> Result<(), Error> {
         // Set seals in groups, based on how recently the seal was added to Linux. Ignore `EINVAL`;
         // we'll verify against `self.must_seal_flags`.
-        for group in [
-            F_SEAL_EXEC,                                              // Linux 6.3
-            F_SEAL_FUTURE_WRITE,                                      // Linux 5.1
-            F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE, // Linux 3.17
-        ] {
-            match crate::syscall::fcntl_add_seals(file, self.seal_flags & group) {
+        const GROUPS: &[SealFlags] = &[
+            // Linux 6.3
+            SealFlags::EXEC,
+            // Linux 5.1
+            SealFlags::FUTURE_WRITE,
+            // Linux 3.17
+            SealFlags::SEAL
+                .set(SealFlags::SHRINK, true)
+                .set(SealFlags::GROW, true)
+                .set(SealFlags::WRITE, true),
+        ];
+
+        for group in GROUPS {
+            match crate::syscall::fcntl_add_seals(file, self.seal_flags.only(*group)) {
                 Ok(()) => {}
                 Err(err) if err.raw_os_error() == Some(EINVAL) => {}
                 Err(err) => return Err(err),
@@ -358,12 +361,19 @@ impl<'a> SealOptions<'a> {
     ///
     /// If the file doesn't support sealing (or `fcntl(2)` otherwise returns an error), this method
     /// returns `false`.
+    #[must_use]
     pub fn is_sealed(&self, file: &File) -> bool {
         self.is_sealed_inner(file).unwrap_or(false)
     }
 
-    fn is_sealed_inner(&self, file: &File) -> Result<bool> {
-        Ok(crate::syscall::fcntl_get_seals(file)? & self.must_seal_flags == self.must_seal_flags)
+    fn is_sealed_inner(&self, file: &File) -> Result<bool, Error> {
+        Ok(crate::syscall::fcntl_get_seals(file)?.all(self.must_seal_flags))
+    }
+}
+
+impl<'a> Default for SealOptions<'a> {
+    fn default() -> SealOptions<'a> {
+        SealOptions::new()
     }
 }
 
@@ -395,20 +405,24 @@ mod test {
     use std::ffi::CString;
     use std::os::unix::fs::PermissionsExt as _;
 
-    use super::{
-        c_int, SealOptions, DEFAULT_MEMFD_NAME, F_SEAL_EXEC, F_SEAL_FUTURE_WRITE, F_SEAL_GROW,
-        F_SEAL_SEAL, F_SEAL_SHRINK, F_SEAL_WRITE, MFD_ALLOW_SEALING, MFD_CLOEXEC, MFD_EXEC,
-        MFD_NOEXEC_SEAL,
-    };
+    use super::{MemfdFlags, SealFlags, SealOptions, DEFAULT_MEMFD_NAME};
+
+    const ALL_SEALS: SealFlags = SealFlags::SEAL
+        .set(SealFlags::SHRINK, true)
+        .set(SealFlags::GROW, true)
+        .set(SealFlags::WRITE, true)
+        .set(SealFlags::FUTURE_WRITE, true)
+        .set(SealFlags::EXEC, true);
+    const NO_SEALS: SealFlags = SealFlags::SEAL.set(SealFlags::SEAL, false);
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[test]
     fn new() {
         let options = SealOptions {
             memfd_name: &CString::new("asdf").unwrap(),
-            memfd_flags: MFD_ALLOW_SEALING,
-            seal_flags: 0,
-            must_seal_flags: 0,
+            memfd_flags: MemfdFlags::ALLOW_SEALING,
+            seal_flags: NO_SEALS,
+            must_seal_flags: ALL_SEALS,
         };
         assert_eq!(
             options
@@ -427,35 +441,32 @@ mod test {
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[test]
     fn flags() {
-        const ALL_SEALS: c_int = F_SEAL_SEAL
-            | F_SEAL_SHRINK
-            | F_SEAL_GROW
-            | F_SEAL_WRITE
-            | F_SEAL_FUTURE_WRITE
-            | F_SEAL_EXEC;
-
         let mut options = SealOptions::new();
-        assert_eq!(options.memfd_flags & MFD_ALLOW_SEALING, MFD_ALLOW_SEALING);
+        assert!(options.memfd_flags.all(MemfdFlags::ALLOW_SEALING));
 
-        assert_eq!(options.memfd_flags & MFD_CLOEXEC, MFD_CLOEXEC);
+        assert!(options.memfd_flags.all(MemfdFlags::CLOEXEC));
         options = options.close_on_exec(false);
-        assert_eq!(options.memfd_flags & MFD_CLOEXEC, 0);
+        assert!(!options.memfd_flags.any(MemfdFlags::CLOEXEC));
         options = options.close_on_exec(true);
-        assert_eq!(options.memfd_flags & MFD_CLOEXEC, MFD_CLOEXEC);
+        assert!(options.memfd_flags.all(MemfdFlags::CLOEXEC));
 
         assert_eq!(
-            options.seal_flags & ALL_SEALS,
-            ALL_SEALS & !F_SEAL_FUTURE_WRITE & !F_SEAL_EXEC
+            options.seal_flags,
+            ALL_SEALS
+                .set(SealFlags::FUTURE_WRITE, false)
+                .set(SealFlags::EXEC, false)
         );
         assert_eq!(
-            options.must_seal_flags & ALL_SEALS,
-            ALL_SEALS & !F_SEAL_FUTURE_WRITE & !F_SEAL_EXEC
+            options.must_seal_flags,
+            ALL_SEALS
+                .set(SealFlags::FUTURE_WRITE, false)
+                .set(SealFlags::EXEC, false)
         );
         options = options
             .must_seal_future_writing(true)
             .must_seal_executable(true);
-        assert_eq!(options.seal_flags & ALL_SEALS, ALL_SEALS);
-        assert_eq!(options.must_seal_flags & ALL_SEALS, ALL_SEALS);
+        assert_eq!(options.seal_flags, ALL_SEALS);
+        assert_eq!(options.must_seal_flags, ALL_SEALS);
         // `seal_*(false)` unsets `must_seal_*`
         options = options
             .seal_seals(false)
@@ -464,8 +475,8 @@ mod test {
             .seal_writing(false)
             .seal_future_writing(false)
             .seal_executable(false);
-        assert_eq!(options.seal_flags & ALL_SEALS, 0);
-        assert_eq!(options.must_seal_flags & ALL_SEALS, 0);
+        assert_eq!(options.seal_flags, NO_SEALS);
+        assert_eq!(options.must_seal_flags, NO_SEALS);
         // `seal_*(true)` does not set `must_seal_*`
         options = options
             .seal_seals(true)
@@ -474,8 +485,8 @@ mod test {
             .seal_writing(true)
             .seal_future_writing(true)
             .seal_executable(true);
-        assert_eq!(options.seal_flags & ALL_SEALS, ALL_SEALS);
-        assert_eq!(options.must_seal_flags & ALL_SEALS, 0);
+        assert_eq!(options.seal_flags, ALL_SEALS);
+        assert_eq!(options.must_seal_flags, NO_SEALS);
         // `must_seal_*(true)` sets `seal_*`
         options = options
             .seal_seals(false)
@@ -484,8 +495,8 @@ mod test {
             .seal_writing(false)
             .seal_future_writing(false)
             .seal_executable(false);
-        assert_eq!(options.seal_flags & ALL_SEALS, 0);
-        assert_eq!(options.must_seal_flags & ALL_SEALS, 0);
+        assert_eq!(options.seal_flags, NO_SEALS);
+        assert_eq!(options.must_seal_flags, NO_SEALS);
         options = options
             .must_seal_seals(true)
             .must_seal_shrinking(true)
@@ -493,8 +504,8 @@ mod test {
             .must_seal_writing(true)
             .must_seal_future_writing(true)
             .must_seal_executable(true);
-        assert_eq!(options.seal_flags & ALL_SEALS, ALL_SEALS);
-        assert_eq!(options.must_seal_flags & ALL_SEALS, ALL_SEALS);
+        assert_eq!(options.seal_flags, ALL_SEALS);
+        assert_eq!(options.must_seal_flags, ALL_SEALS);
         // `must_seal_*(false)` does not unset `seal_*`
         options = options
             .must_seal_seals(false)
@@ -503,46 +514,45 @@ mod test {
             .must_seal_writing(false)
             .must_seal_future_writing(false)
             .must_seal_executable(false);
-        assert_eq!(options.seal_flags & ALL_SEALS, ALL_SEALS);
-        assert_eq!(options.must_seal_flags & ALL_SEALS, 0);
+        assert_eq!(options.seal_flags, ALL_SEALS);
+        assert_eq!(options.must_seal_flags, NO_SEALS);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[test]
     fn execute_flags() {
         let mut options = SealOptions::new();
-        assert_eq!(options.seal_flags & F_SEAL_EXEC, 0);
+        assert!(!options.seal_flags.any(SealFlags::EXEC));
         options = options.seal_executable(true);
-        assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
+        assert!(options.seal_flags.all(SealFlags::EXEC));
         options = options.seal_executable(false);
-        assert_eq!(options.seal_flags & F_SEAL_EXEC, 0);
+        assert!(!options.seal_flags.any(SealFlags::EXEC));
 
         for _ in 0..2 {
             options = options.executable(true);
-            assert_eq!(options.memfd_flags & (MFD_EXEC | MFD_NOEXEC_SEAL), MFD_EXEC);
-            assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
+            assert!(options.memfd_flags.all(MemfdFlags::EXEC));
+            assert!(!options.memfd_flags.any(MemfdFlags::NOEXEC_SEAL));
+            assert!(options.seal_flags.all(SealFlags::EXEC));
             // no-op once `executable` is called
             options = options.seal_executable(false);
-            assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
+            assert!(options.seal_flags.all(SealFlags::EXEC));
 
             options = options.executable(false);
-            assert_eq!(
-                options.memfd_flags & (MFD_EXEC | MFD_NOEXEC_SEAL),
-                MFD_NOEXEC_SEAL
-            );
-            assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
+            assert!(!options.memfd_flags.any(MemfdFlags::EXEC));
+            assert!(options.memfd_flags.all(MemfdFlags::NOEXEC_SEAL));
+            assert!(options.seal_flags.all(SealFlags::EXEC));
             // no-op once `executable` is called
             options = options.seal_executable(false);
-            assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
+            assert!(options.seal_flags.all(SealFlags::EXEC));
         }
 
-        assert_eq!(options.must_seal_flags & F_SEAL_EXEC, 0);
+        assert!(!options.must_seal_flags.any(SealFlags::EXEC));
         options = options.must_seal_executable(true);
-        assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
-        assert_eq!(options.must_seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
+        assert!(options.seal_flags.all(SealFlags::EXEC));
+        assert!(options.must_seal_flags.all(SealFlags::EXEC));
         options = options.seal_executable(false);
-        assert_eq!(options.seal_flags & F_SEAL_EXEC, F_SEAL_EXEC);
-        assert_eq!(options.must_seal_flags & F_SEAL_EXEC, 0);
+        assert!(options.seal_flags.all(SealFlags::EXEC));
+        assert!(!options.must_seal_flags.any(SealFlags::EXEC));
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

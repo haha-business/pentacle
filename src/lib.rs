@@ -29,10 +29,11 @@
     missing_copy_implementations,
     missing_debug_implementations,
     missing_docs,
-    rust_2018_idioms
+    rust_2018_idioms,
+    unsafe_op_in_unsafe_fn
 )]
 #![warn(clippy::pedantic)]
-#![allow(clippy::must_use_candidate, clippy::needless_doctest_main)]
+#![allow(clippy::needless_doctest_main)]
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 compile_error!("pentacle only works on linux or android");
@@ -44,7 +45,7 @@ pub use crate::file::{MustSealError, SealOptions};
 
 use std::fmt::{self, Debug};
 use std::fs::File;
-use std::io::{self, Read, Result, Write};
+use std::io::{self, Error, Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
@@ -68,7 +69,7 @@ const OPTIONS: SealOptions<'static> = SealOptions::new().executable(true);
 /// An error is returned if `/proc/self/exe` fails to open, `memfd_create(2)` fails, the `fcntl(2)`
 /// `F_GET_SEALS` or `F_ADD_SEALS` commands fail, or copying from `/proc/self/exe` to the anonymous
 /// file fails.
-pub fn ensure_sealed() -> Result<()> {
+pub fn ensure_sealed() -> Result<(), Error> {
     let mut file = File::open("/proc/self/exe")?;
     if OPTIONS.is_sealed(&file) {
         Ok(())
@@ -86,6 +87,7 @@ pub fn ensure_sealed() -> Result<()> {
 /// Verify whether the currently running program is a sealed anonymous file.
 ///
 /// This function returns `false` if opening `/proc/self/exe` fails.
+#[must_use]
 pub fn is_sealed() -> bool {
     File::open("/proc/self/exe")
         .map(|f| OPTIONS.is_sealed(&f))
@@ -116,7 +118,7 @@ impl SealedCommand {
     ///
     /// An error is returned if `memfd_create(2)` fails, the `fcntl(2)` `F_GET_SEALS` or
     /// `F_ADD_SEALS` commands fail, or copying from `program` to the anonymous file fails.
-    pub fn new<R: Read>(program: &mut R) -> Result<Self> {
+    pub fn new<R: Read>(program: &mut R) -> Result<Self, Error> {
         // If the program starts with `#!` (a shebang or hash-bang), the kernel will (almost
         // always; depends if `BINFMT_SCRIPT` is enabled) determine which interpreter to exec and
         // pass the script along as the first argument. In this case, the argument will be

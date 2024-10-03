@@ -1,6 +1,6 @@
 [package]
 name = "pentacle"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.59"
 description = "Executes programs as sealed anonymous files on Linux"
@@ -12,7 +12,14 @@ exclude = [".github", ".gitignore"]
 
 [dependencies]
 libc = "0.2.153"
-log = "0.4.4"
+log = { version = "0.4.4", optional = true }
+
+[features]
+default = ["log"]
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ["cfg(coverage_nightly)"]
 
 [package.metadata.docs.rs]
 # https://docs.rs/about/metadata
