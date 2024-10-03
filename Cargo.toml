@@ -14,6 +14,10 @@ exclude = [".github", ".gitignore"]
 libc = "0.2.153"
 log = "0.4.4"
 
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ["cfg(coverage_nightly)"]
+
 [package.metadata.docs.rs]
 # https://docs.rs/about/metadata
 targets = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
