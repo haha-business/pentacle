@@ -367,6 +367,12 @@ impl<'a> SealOptions<'a> {
     }
 }
 
+impl<'a> Default for SealOptions<'a> {
+    fn default() -> SealOptions<'a> {
+        SealOptions::new()
+    }
+}
+
 /// The [`Error::source`][`std::error::Error::source`] returned by [`SealOptions::seal`] if required
 /// seals are not present.
 #[allow(missing_copy_implementations)]
