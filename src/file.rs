@@ -81,8 +81,7 @@ macro_rules! seal {
 }
 
 /// Options for creating a sealed anonymous file.
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct SealOptions<'a> {
     memfd_name: &'a CStr,
@@ -107,8 +106,7 @@ impl<'a> SealOptions<'a> {
     ///     .must_seal_writing(true)
     ///     .seal_future_writing(false)
     ///     .seal_executable(false);
-    /// # // terrible hack to test equivalence without committing to `PartialEq`
-    /// # assert_eq!(format!("{:?}", result), format!("{:?}", SealOptions::new()));
+    /// # assert_eq!(result, SealOptions::new());
     /// ```
     pub const fn new() -> SealOptions<'a> {
         SealOptions {
