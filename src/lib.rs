@@ -29,10 +29,11 @@
     missing_copy_implementations,
     missing_debug_implementations,
     missing_docs,
-    rust_2018_idioms
+    rust_2018_idioms,
+    unsafe_op_in_unsafe_fn
 )]
 #![warn(clippy::pedantic)]
-#![allow(clippy::must_use_candidate, clippy::needless_doctest_main)]
+#![allow(clippy::needless_doctest_main)]
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 compile_error!("pentacle only works on linux or android");
@@ -86,6 +87,7 @@ pub fn ensure_sealed() -> Result<(), Error> {
 /// Verify whether the currently running program is a sealed anonymous file.
 ///
 /// This function returns `false` if opening `/proc/self/exe` fails.
+#[must_use]
 pub fn is_sealed() -> bool {
     File::open("/proc/self/exe")
         .map(|f| OPTIONS.is_sealed(&f))

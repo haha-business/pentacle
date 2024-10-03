@@ -356,6 +356,7 @@ impl<'a> SealOptions<'a> {
     ///
     /// If the file doesn't support sealing (or `fcntl(2)` otherwise returns an error), this method
     /// returns `false`.
+    #[must_use]
     pub fn is_sealed(&self, file: &File) -> bool {
         self.is_sealed_inner(file).unwrap_or(false)
     }
