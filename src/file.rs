@@ -149,9 +149,11 @@ impl<'a> SealOptions<'a> {
     /// given tools to control this (see also <https://lwn.net/Articles/918106/>):
     ///
     /// - Setting the sysctl `vm.memfd_noexec = 1` disables creating executable anonymous files
-    ///   unless the program requests it with `MFD_EXEC`.
+    ///   unless the program requests it with `MFD_EXEC` (set by pentacle if `executable` is
+    ///   `true`).
     /// - Setting the sysctl `vm.memfd_noexec = 2` disables the ability to create executable
-    ///   anonymous files altogether, and `MFD_NOEXEC_SEAL` _must_ be used.
+    ///   anonymous files altogether, and `MFD_NOEXEC_SEAL` _must_ be used (set by pentacle if
+    ///   `executable` is `false`).
     /// - Calling `memfd_create(2)` with `MFD_NOEXEC_SEAL` enables the `F_SEAL_EXEC` seal.
     ///
     /// Linux prior to 6.3 is unaware of `MFD_EXEC` and `F_SEAL_EXEC`. If `memfd_create(2)` sets
@@ -228,7 +230,9 @@ impl<'a> SealOptions<'a> {
         seal_executable {
             #[doc = ""]
             #[doc = "If [`SealOptions::executable`] has already been called,"]
-            #[doc = "this function does nothing."]
+            #[doc = "this function does nothing, apart from setting"]
+            #[doc = "[`SealOptions::must_seal_executable`] to `false`"]
+            #[doc = "if `seal_executable` is `false`."]
             #[doc = ""]
             #[doc = "This requires at least Linux 6.3."]
         },
