@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `SealedCommand` and `execute_sealed` set `F_SEAL_EXEC` on Linux 6.3 and newer
+- `log` is now an optional dependency (remains enabled by default)
 - Moved source repository to <https://github.com/haha-business/pentacle>
 - Minimum supported Rust version (MSRV) now 1.59.0
 

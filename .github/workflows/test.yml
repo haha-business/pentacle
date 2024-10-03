@@ -23,6 +23,7 @@ jobs:
       - run: sudo sysctl -w ${{ matrix.sysctl }}
       - run: rustup default ${{ matrix.toolchain }}
       - run: cargo test --locked ${{ matrix.test_args }}
+      - run: cargo test --locked --no-default-features ${{ matrix.test_args }}
       - run: cargo fmt -- --check
         if: ${{ matrix.toolchain == 'stable' }}
       - run: cargo clippy --locked --all-targets -- -D warnings

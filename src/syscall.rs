@@ -13,12 +13,12 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use libc::{
     c_char, c_int, c_long, c_uint, syscall, SYS_fcntl, SYS_memfd_create, F_ADD_SEALS, F_GET_SEALS,
 };
-use log::trace;
 
 pub(crate) fn memfd_create(name: &CStr, flags: c_uint) -> Result<File> {
     let name: *const c_char = name.as_ptr();
     let retval = unsafe { syscall(SYS_memfd_create, name, flags) };
-    trace!("memfd_create({:?}, {}) = {}", name, flags, retval);
+    #[cfg(feature = "log")]
+    log::trace!("memfd_create({:?}, {}) = {}", name, flags, retval);
     check_syscall(retval)?;
     Ok(unsafe { File::from_raw_fd(retval as c_int) })
 }
@@ -27,7 +27,8 @@ pub(crate) fn fcntl_get_seals(file: &File) -> Result<c_int> {
     let fd: c_int = file.as_raw_fd();
     let flag: c_int = F_GET_SEALS;
     let retval = unsafe { syscall(SYS_fcntl, fd, flag) };
-    trace!("fcntl({}, {}) = {}", fd, flag, retval);
+    #[cfg(feature = "log")]
+    log::trace!("fcntl({}, {}) = {}", fd, flag, retval);
     check_syscall(retval)?;
     Ok(retval as c_int)
 }
@@ -36,7 +37,8 @@ pub(crate) fn fcntl_add_seals(file: &File, arg: c_int) -> Result<()> {
     let fd: c_int = file.as_raw_fd();
     let flag: c_int = F_ADD_SEALS;
     let retval = unsafe { syscall(SYS_fcntl, fd, flag, arg) };
-    trace!("fcntl({}, {}, {}) = {}", fd, flag, arg, retval);
+    #[cfg(feature = "log")]
+    log::trace!("fcntl({}, {}, {}) = {}", fd, flag, arg, retval);
     check_syscall(retval)
 }
 
