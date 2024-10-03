@@ -8,11 +8,24 @@ on:
   merge_group:
 jobs:
   test:
+    strategy:
+      matrix:
+        toolchain: [stable, 1.59]
+        sysctl: ["vm.memfd_noexec=0", "vm.memfd_noexec=1"]
+        include:
+          - toolchain: 1.59
+            # https://users.rust-lang.org/t/skip-doctest-from-command-line/57379/2
+            test_args: --lib --bins --tests
+      fail-fast: false
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: rustup update stable
+      - run: sudo sysctl -w ${{ matrix.sysctl }}
+      - run: rustup default ${{ matrix.toolchain }}
+      - run: cargo test --locked ${{ matrix.test_args }}
       - run: cargo fmt -- --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
-      - run: cargo doc
+        if: ${{ matrix.toolchain == 'stable' }}
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        if: ${{ matrix.toolchain == 'stable' }}
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --locked
+        if: ${{ matrix.toolchain == 'stable' }}
