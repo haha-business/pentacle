@@ -6,7 +6,7 @@
 use std::ffi::CStr;
 use std::fmt::{self, Debug, Display};
 use std::fs::{File, Permissions};
-use std::io::{self, Error, ErrorKind, Read, Result};
+use std::io::{self, Error, ErrorKind, Read};
 use std::os::unix::fs::PermissionsExt as _;
 
 use libc::{
@@ -261,7 +261,7 @@ impl<'a> SealOptions<'a> {
     ///
     /// This method returns an error when any of [`SealOptions::create`], [`std::io::copy`], or
     /// [`SealOptions::seal`] fail.
-    pub fn copy_and_seal<R: Read>(&self, reader: &mut R) -> Result<File> {
+    pub fn copy_and_seal<R: Read>(&self, reader: &mut R) -> Result<File, Error> {
         let mut file = self.create()?;
         io::copy(reader, &mut file)?;
         self.seal(&mut file)?;
@@ -279,7 +279,7 @@ impl<'a> SealOptions<'a> {
     /// This method returns an error when:
     /// - `memfd_create(2)` fails
     /// - `SealOptions::executable` was set but permissions cannot be changed as required
-    pub fn create(&self) -> Result<File> {
+    pub fn create(&self) -> Result<File, Error> {
         let file = match crate::syscall::memfd_create(self.memfd_name, self.memfd_flags) {
             Ok(file) => file,
             Err(err) if err.raw_os_error() == Some(EINVAL) && self.is_executable_set() => {
@@ -327,7 +327,7 @@ impl<'a> SealOptions<'a> {
     /// - the `fcntl(2)` `F_GET_SEALS` command fails
     /// - if any required seals are not present (in this case,
     ///   [`Error::source`][`std::error::Error::source`] will be [`MustSealError`])
-    pub fn seal(&self, file: &mut File) -> Result<()> {
+    pub fn seal(&self, file: &mut File) -> Result<(), Error> {
         // Set seals in groups, based on how recently the seal was added to Linux. Ignore `EINVAL`;
         // we'll verify against `self.must_seal_flags`.
         for group in [
@@ -360,7 +360,7 @@ impl<'a> SealOptions<'a> {
         self.is_sealed_inner(file).unwrap_or(false)
     }
 
-    fn is_sealed_inner(&self, file: &File) -> Result<bool> {
+    fn is_sealed_inner(&self, file: &File) -> Result<bool, Error> {
         Ok(crate::syscall::fcntl_get_seals(file)? & self.must_seal_flags == self.must_seal_flags)
     }
 }
